@@ -10,23 +10,12 @@ $ kind create cluster --name teleport-demo --config cluster.yaml
 $ export KUBECONFIG="$(kind get kubeconfig-path --name="teleport-demo")"
 ```
 
-## Install Helm
-
-[https://helm.sh/docs/using_helm/#installing-helm](https://helm.sh/docs/using_helm/#installing-helm)
-
-```console
-$ kubectl apply -f helm-account.yaml
-$ helm init --service-account helm
-$ helm repo update
-```
-
 ## Install cert-manager
 
 ```console
-$ kubectl apply -f https://raw.githubusercontent.com/jetstack/cert-manager/release-0.6/deploy/manifests/00-crds.yaml  
 $ kubectl create namespace cert-manager
 $ kubectl label namespace cert-manager certmanager.k8s.io/disable-validation="true"
-$ helm install --name cert-manager --namespace cert-manager stable/cert-manager
+$ kubectl apply -f https://github.com/jetstack/cert-manager/releases/download/v0.10.0/cert-manager.yaml
 ```
 
 ## Generate certificate
