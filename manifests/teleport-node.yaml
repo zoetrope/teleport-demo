@@ -1,0 +1,80 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: teleport-secret
+  namespace: teleport
+type: Opaque
+stringData:
+  teleport.yaml: |
+    teleport:
+      data_dir: /var/lib/teleport
+      auth_servers:
+        - teleport-auth.teleport.svc.cluster.local:3025
+      auth_token: <Generated Auth Token>
+      log:
+        output: stderr
+        severity: DEBUG
+      storage:
+        type: dir
+    ssh_service:
+      enabled: "yes"
+      x11:
+        enabled: "yes"
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: node-demo
+  namespace: teleport
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: node-demo
+  namespace: teleport
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: node
+      app.kubernetes.io/name: teleport
+  serviceName: node-demo
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: node
+        app.kubernetes.io/name: teleport
+    spec:
+      automountServiceAccountToken: true
+      containers:
+        - args:
+            - --roles=node
+            - --labels=team=demo
+            - --diag-addr=0.0.0.0:3020
+          image: ghcr.io/cybozu/teleport-node:15.3.7.2
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 3020
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          name: node-demo
+          ports:
+            - containerPort: 3020
+              name: metrics
+          volumeMounts:
+            - mountPath: /etc/teleport
+              name: teleport-node-secret
+              readOnly: true
+            - mountPath: /var/lib/teleport
+              name: teleport-storage
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10000
+      serviceAccountName: node-demo
+      volumes:
+        - name: teleport-node-secret
+          secret:
+            secretName: teleport-secret
+        - emptyDir: {}
+          name: teleport-storage
