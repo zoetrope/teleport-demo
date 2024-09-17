@@ -1,81 +1,102 @@
 
-## Install kubectl
+## Prerequisites
 
-See [https://kubernetes.io/docs/tasks/tools/install-kubectl/](https://kubernetes.io/docs/tasks/tools/install-kubectl/) .
+Refer to the following document to install aqua CLI.
+
+https://aquaproj.github.io/docs/install
+
+Install tools with aqua.
+
+```console
+$ aqua install
+```
+
+Install teleport CLI
+
+https://gravitational.com/teleport/download/
+
+```console
+$ wget https://cdn.teleport.dev/teleport-v16.3.0-linux-amd64-bin.tar.gz   
+$ tar xvf teleport-v16.3.0-linux-amd64-bin.tar.gz
+```
 
 ## Create Kubernetes cluster
 
 ```console
 $ kind create cluster --name teleport-demo --config cluster.yaml 
-$ export KUBECONFIG="$(kind get kubeconfig-path --name="teleport-demo")"
 ```
 
-## Install Helm
+## Deploy teleport
 
-[https://helm.sh/docs/using_helm/#installing-helm](https://helm.sh/docs/using_helm/#installing-helm)
+ref. https://goteleport.com/docs/admin-guides/deploy-a-cluster/helm-deployments/kubernetes-cluster/
 
 ```console
-$ kubectl apply -f helm-account.yaml
-$ helm init --service-account helm
+$ helm repo add teleport https://charts.releases.teleport.dev
 $ helm repo update
 ```
 
-## Install cert-manager
-
 ```console
-$ kubectl apply -f https://raw.githubusercontent.com/jetstack/cert-manager/release-0.10/deploy/manifests/00-crds.yaml
-$ kubectl create namespace cert-manager
-$ kubectl label namespace cert-manager certmanager.k8s.io/disable-validation=true
-$ helm repo add jetstack https://charts.jetstack.io
-$ helm repo update
-$ helm install --name cert-manager --namespace cert-manager --version v0.10.0 jetstack/cert-manager
+helm template teleport --namespace teleport teleport/teleport-cluster \
+  --create-namespace \
+  --version 16.3.0 \
+  --values teleport-cluster-values.yaml \
+  > manifests/teleport-cluster.yaml
 ```
 
-## Generate certificate
-
 ```console
-$ kubectl apply -f certificate.yaml
-```
-
-## Install teleport
-
-```console
-$ git clone https://github.com/gravitational/teleport.git $GOPATH/src/github.com/gravitational/teleport
 $ kubectl create namespace teleport
-$ helm install --name teleport --namespace teleport -f values.yaml $GOPATH/src/github.com/gravitational/teleport/examples/chart/teleport/
+$ kustomize build ./manifests/ | kubectl apply -f -
 ```
 
-## Setup GitHub Integration
+## Create user
 
-```yaml
-kind: github
-version: v3
-metadata:
-  name: github
-spec:
-  client_id: <client-id>
-  client_secret: <client-secret>
-  display: Github
-  redirect_url: https://teleport.example.com:3080/v1/webapi/github/callback
-  teams_to_logins:
-    - organization: <your-organization>
-      team: <your-team>
-      logins:
-        - root
-      kubernetes_groups: ["system:masters"]
+```console
+$ kubectl exec -i -n teleport deployment/teleport-auth -- tctl create -f < member.yaml
+$ kubectl exec -ti -n teleport deployment/teleport-auth -- tctl users add myuser --roles=member,access,editor
 ```
 
 ```console
-$ kubectl -n teleport exec -it teleport-xxx bash
-$ tctl create github.yaml
+$ tsh login --proxy=localhost:3080 --user=myuser --insecure
+$ tsh ssh --proxy=localhost:3080 --insecure cybozu@node-demo-0
 ```
 
-## Install teleport CLI
+## Add node
 
-[https://gravitational.com/teleport/download/](https://gravitational.com/teleport/download/)
+Generate a token to join the cluster for a teleport node.
 
-## Login
-
+```console
+$ kubectl exec -ti -n teleport deployment/teleport-auth -- tctl tokens add --type=node
 ```
-$ tsh login --insecure --proxy=teleport.example.com:3080 --auth=github
+
+Put the token to `teleport.auth_token` in `./manifests/teleport-node.yaml`.
+
+Deploy a teleport node.
+
+```console
+$ kubectl apply -f ./manifests/teleport-node.yaml
+```
+
+## Use API
+
+Create a user for API access.
+
+```console
+$ kubectl exec -i -n teleport deployment/teleport-auth -- tctl create -f < api-access.yaml
+
+$ kubectl exec -ti -n teleport deployment/teleport-auth -- tctl users add api-access --roles=api-access
+```
+
+Generate a token for API access.
+
+```console
+$ tsh login --proxy=localhost:3080 --user=api-access --insecure --ttl=5256000
+
+$ tctl --auth-server=localhost:3025 auth sign --ttl=87500h --user=api-access --out=client-demo/api-access.pem
+```
+
+Run a program to access the API.
+
+```console
+$ cd client-demo
+$ go run main.go
 ```
